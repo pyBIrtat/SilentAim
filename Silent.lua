@@ -255,7 +255,6 @@ local MainBOX = GeneralTab:AddLeftTabbox("Main") do
         
         mouse_box.Visible = SilentAimSettings.Enabled
     end)
-    
     Main:AddToggle("TeamCheck", {Text = "Team Check", Default = SilentAimSettings.TeamCheck}):OnChanged(function()
         SilentAimSettings.TeamCheck = Toggles.TeamCheck.Value
     end)
@@ -285,8 +284,8 @@ local MainBOX = GeneralTab:AddLeftTabbox("Main") do
     Options.HitChance:OnChanged(function()
         SilentAimSettings.HitChance = Options.HitChance.Value
     end)
+    Main:AddButton("Unload", function() Library:Unload() end)
 end
-
 local MiscellaneousBOX = GeneralTab:AddLeftTabbox("Miscellaneous")
 local FieldOfViewBOX = GeneralTab:AddLeftTabbox("Field Of View") do
     local Main = FieldOfViewBOX:AddTab("Visuals")
@@ -468,6 +467,3 @@ oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, Index)
 
     return oldIndex(self, Index)
 end))
-Main:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightControl", NoUI = true, Text = "Menu keybind" })
-Main:AddButton("Unload", function() Library:Unload() end)
-Library.ToggleKeybind = Optioned.MenuKeybind -- Allows you to have a custom keybind for the menu
