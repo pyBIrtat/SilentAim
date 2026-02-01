@@ -1,9 +1,8 @@
--- Universal Roblox Shooter Hack Script using Linoria UI Library
--- Inspired by Neverlose/Skeet, with many features
--- UI Keybind: LeftCtrl (toggle menu)
--- Config saving/loading: Not built-in, skipped for simplicity
+
+
 local Lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/mstudio45/linorialib/main/Library.lua"))()
 local Window = Lib:CreateWindow("Universal Shooter Hack")
+local Options = Lib.Options
 -- Tabs
 local AimTab = Window:AddTab("Aim")
 local VisualsTab = Window:AddTab("Visuals")
@@ -1645,11 +1644,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     end)
 end)
 -- Menu Toggle
-local MenuVisible = true
-UserInputService.InputBegan:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.LeftControl then
-        MenuVisible = not MenuVisible
-        Lib.Window:Toggle(MenuVisible)
-    end
-end)
+MiscLeftGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightControl", NoUI = true, Text = "Menu keybind" })
+MiscLeftGroup:AddButton("Unload", function() Library:Unload() end)
+Lib.ToggleKeybind = Options.MenuKeybind -- Allows you to have a custom keybind for the menu
 Lib:Notify("Universal Hack Loaded!")
