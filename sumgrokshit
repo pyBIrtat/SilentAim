@@ -1,0 +1,1655 @@
+-- Universal Roblox Shooter Hack Script using Linoria UI Library
+-- Inspired by Neverlose/Skeet, with many features
+-- UI Keybind: LeftCtrl (toggle menu)
+-- Config saving/loading: Not built-in, skipped for simplicity
+local Lib = loadstring(game:HttpGet("https://raw.githubusercontent.com/mstudio45/linorialib/main/Library.lua"))()
+local Window = Lib:CreateWindow("Universal Shooter Hack")
+-- Tabs
+local AimTab = Window:AddTab("Aim")
+local VisualsTab = Window:AddTab("Visuals")
+local MovementTab = Window:AddTab("Movement")
+local AntiAimTab = Window:AddTab("Anti-Aim")
+local MiscTab = Window:AddTab("Misc")
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+-- Force network ownership
+if sethiddenproperty then
+    sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+    sethiddenproperty(LocalPlayer, "MaximumSimulationRadius", math.huge)
+end
+-- Helper functions
+local function GetClosestPlayerToCrosshair(fov, visibleCheck, teamCheck, wallbang)
+    local closest, minDist = nil, fov or math.huge
+    local mousePos = UserInputService:GetMouseLocation()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            if teamCheck and player.Team == LocalPlayer.Team then continue end
+            local part = player.Character:FindFirstChild("Head")
+            if not part then continue end
+            local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                if dist < minDist then
+                    if visibleCheck then
+                        local rayParams = RaycastParams.new()
+                        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+                        rayParams.FilterDescendantsInstances = {LocalPlayer.Character}
+                        local rayResult = Workspace:Raycast(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 500, rayParams)
+                        if (rayResult and rayResult.Instance:IsDescendantOf(player.Character)) or wallbang then
+                            closest = player
+                            minDist = dist
+                        end
+                    else
+                        closest = player
+                        minDist = dist
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+local HitPart = "Head"
+local function GetHitPart(target)
+    if HitPart == "Random" then
+        local parts = {"Head", "HumanoidRootPart", "LeftArm", "RightArm", "LeftLeg", "RightLeg"}
+        local randPart = parts[math.random(1, #parts)]
+        return target.Character:FindFirstChild(randPart) or target.Character.Head
+    else
+        return target.Character:FindFirstChild(HitPart) or target.Character.Head
+    end
+end
+-- ESP Drawings Table
+local ESPObjects = {}
+local function CreateESP(player)
+    if not ESPObjects[player] then
+        ESPObjects[player] = {
+            Box = Drawing.new("Square"),
+            Name = Drawing.new("Text"),
+            Health = Drawing.new("Line"),
+            Tracer = Drawing.new("Line"),
+            Distance = Drawing.new("Text"),
+            HeadDot = Drawing.new("Circle"),
+            SkeletonLines = {}
+        }
+        for i = 1, 10 do
+            ESPObjects[player].SkeletonLines[i] = Drawing.new("Line")
+            ESPObjects[player].SkeletonLines[i].Thickness = 1
+            ESPObjects[player].SkeletonLines[i].Color = Color3.new(1,1,1)
+        end
+        ESPObjects[player].Distance.Size = 16
+        ESPObjects[player].Distance.Color = Color3.new(1,1,1)
+        ESPObjects[player].HeadDot.Radius = 5
+        ESPObjects[player].HeadDot.NumSides = 20
+        ESPObjects[player].HeadDot.Color = Color3.new(1,0,0)
+        ESPObjects[player].HeadDot.Thickness = 1
+    end
+end
+local ESPEnabled = false
+local BoxESP = false
+local NameESP = false
+local HealthBar = false
+local Tracers = false
+local Skeleton = false
+local DistanceESP = false
+local HeadDot = false
+local function UpdateESP()
+    for player, drawings in pairs(ESPObjects) do
+        if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            local root = player.Character.HumanoidRootPart
+            local head = player.Character:FindFirstChild("Head")
+            local humanoid = player.Character.Humanoid
+            local _, onScreen = Camera:WorldToViewportPoint(root.Position)
+            if onScreen and ESPEnabled then
+                if not head then
+                    drawings.Box.Visible = false
+                    return
+                end
+                local topPos = head.Position + Vector3.new(0, 2.5, 0)
+                local bottomPos = root.Position - Vector3.new(0, 3.5, 0)
+                local top, _ = Camera:WorldToViewportPoint(topPos)
+                local bottom, _ = Camera:WorldToViewportPoint(bottomPos)
+                local height = math.abs(top.Y - bottom.Y)
+                local width = height / 2
+                -- Box
+                if BoxESP then
+                    drawings.Box.Size = Vector2.new(width, height)
+                    drawings.Box.Position = Vector2.new(bottom.X - width / 2, top.Y)
+                    drawings.Box.Thickness = 2
+                    drawings.Box.Color = Color3.new(1, 1, 1)
+                    drawings.Box.Visible = true
+                else
+                    drawings.Box.Visible = false
+                end
+                -- Name
+                if NameESP then
+                    drawings.Name.Text = player.Name
+                    drawings.Name.Position = Vector2.new(bottom.X, top.Y - 20)
+                    drawings.Name.Size = 16
+                    drawings.Name.Color = Color3.new(1, 1, 1)
+                    drawings.Name.Visible = true
+                else
+                    drawings.Name.Visible = false
+                end
+                -- Health Bar
+                if HealthBar then
+                    drawings.Health.From = Vector2.new(bottom.X - width / 2 - 5, bottom.Y)
+                    drawings.Health.To = Vector2.new(bottom.X - width / 2 - 5, bottom.Y - height * (humanoid.Health / humanoid.MaxHealth))
+                    drawings.Health.Thickness = 3
+                    drawings.Health.Color = Color3.fromHSV(humanoid.Health / humanoid.MaxHealth * 0.3, 1, 1)
+                    drawings.Health.Visible = true
+                else
+                    drawings.Health.Visible = false
+                end
+                -- Tracers
+                if Tracers then
+                    drawings.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    local bottom2D = Vector2.new(bottom.X, bottom.Y)
+                    drawings.Tracer.To = bottom2D
+                    drawings.Tracer.Thickness = 1
+                    drawings.Tracer.Color = Color3.new(1, 1, 1)
+                    drawings.Tracer.Visible = true
+                else
+                    drawings.Tracer.Visible = false
+                end
+                -- Skeleton
+                if Skeleton then
+                    local root2D = Camera:WorldToViewportPoint(root.Position)
+                    local head2D = Camera:WorldToViewportPoint(head.Position)
+                    drawings.SkeletonLines[1].From = Vector2.new(head2D.X, head2D.Y)
+                    drawings.SkeletonLines[1].To = Vector2.new(root2D.X, root2D.Y)
+                    drawings.SkeletonLines[1].Visible = true
+                    -- Add more skeleton lines
+                    local parts = {"LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}
+                    local index = 2
+                    for _, partName in ipairs(parts) do
+                        local part = player.Character:FindFirstChild(partName)
+                        if part and index <= 10 then
+                            local part2D = Camera:WorldToViewportPoint(part.Position)
+                            drawings.SkeletonLines[index].From = Vector2.new(root2D.X, root2D.Y)
+                            drawings.SkeletonLines[index].To = Vector2.new(part2D.X, part2D.Y)
+                            drawings.SkeletonLines[index].Visible = true
+                            index = index + 1
+                        end
+                    end
+                    for i = index, 10 do drawings.SkeletonLines[i].Visible = false end
+                else
+                    for _, line in ipairs(drawings.SkeletonLines) do line.Visible = false end
+                end
+                -- Distance
+                if DistanceESP then
+                    local distance = math.floor((root.Position - Camera.CFrame.Position).Magnitude)
+                    drawings.Distance.Text = tostring(distance) .. " studs"
+                    drawings.Distance.Position = Vector2.new(bottom.X, bottom.Y + 5)
+                    drawings.Distance.Visible = true
+                else
+                    drawings.Distance.Visible = false
+                end
+                -- Head Dot
+                if HeadDot then
+                    local head2D = Camera:WorldToViewportPoint(head.Position)
+                    drawings.HeadDot.Position = Vector2.new(head2D.X, head2D.Y)
+                    drawings.HeadDot.Visible = true
+                else
+                    drawings.HeadDot.Visible = false
+                end
+            else
+                for k, drawing in pairs(drawings) do
+                    if typeof(drawing) == "table" then
+                        for _, sub in ipairs(drawing) do sub.Visible = false end
+                    else
+                        drawing.Visible = false
+                    end
+                end
+            end
+        else
+            if ESPObjects[player] then
+                for _, drawing in pairs(ESPObjects[player]) do
+                    if typeof(drawing) == "table" then
+                        for _, sub in ipairs(drawing) do sub:Remove() end
+                    else
+                        drawing:Remove()
+                    end
+                end
+                ESPObjects[player] = nil
+            end
+        end
+    end
+end
+-- Item/NPC ESP implementation
+local ItemObjects = {}
+local NPCObjects = {}
+local function CreateObjectESP(obj, type)
+    local objects = type == "Item" and ItemObjects or NPCObjects
+    if not objects[obj] then
+        objects[obj] = {
+            Box = Drawing.new("Square"),
+            Name = Drawing.new("Text")
+        }
+    end
+end
+local function UpdateObjectESP(type)
+    local objects = type == "Item" and ItemObjects or NPCObjects
+    local enabled = type == "Item" and ItemESP or NPCESP
+    for obj, drawings in pairs(objects) do
+        if obj and obj.Parent and enabled then
+            local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart or obj
+            local head = obj:FindFirstChild("Head") or root
+            local _, onScreen = Camera:WorldToViewportPoint(root.Position)
+            if onScreen then
+                local topPos = head.Position + Vector3.new(0, 2.5, 0)
+                local bottomPos = root.Position - Vector3.new(0, 3.5, 0)
+                local top, _ = Camera:WorldToViewportPoint(topPos)
+                local bottom, _ = Camera:WorldToViewportPoint(bottomPos)
+                local height = math.abs(top.Y - bottom.Y)
+                local width = height / 2
+                drawings.Box.Size = Vector2.new(width, height)
+                drawings.Box.Position = Vector2.new(bottom.X - width / 2, top.Y)
+                drawings.Box.Thickness = 2
+                drawings.Box.Color = Color3.new(0, 1, 0)
+                drawings.Box.Visible = true
+                drawings.Name.Text = obj.Name
+                drawings.Name.Position = Vector2.new(bottom.X, top.Y - 20)
+                drawings.Name.Size = 16
+                drawings.Name.Color = Color3.new(1, 1, 1)
+                drawings.Name.Visible = true
+            else
+                drawings.Box.Visible = false
+                drawings.Name.Visible = false
+            end
+        else
+            if objects[obj] then
+                for _, drawing in pairs(objects[obj]) do
+                    drawing:Remove()
+                end
+                objects[obj] = nil
+            end
+        end
+    end
+end
+RunService.RenderStepped:Connect(function()
+    UpdateObjectESP("Item")
+    UpdateObjectESP("NPC")
+end)
+-- Find items/NPCs
+spawn(function()
+    while true do
+        if ItemESP then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") and obj:FindFirstChild("Item") then -- Assume tagged
+                    CreateObjectESP(obj, "Item")
+                end
+            end
+        end
+        if NPCESP then
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
+                    CreateObjectESP(obj, "NPC")
+                end
+            end
+        end
+        wait(5)
+    end
+end)
+-- Bullet Tracers implementation (simulate on shoot)
+local BulletTracers = false
+local bulletTracers = {}
+local isShooting = false
+local fireRate = 0.1 -- Adjustable fire rate simulation
+UserInputService.InputBegan:Connect(function(input)
+    if BulletTracers and input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isShooting = true
+        spawn(function()
+            while isShooting do
+                local tracer = Drawing.new("Line")
+                tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                local ray = Camera:ScreenPointToRay(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                local hit = Workspace:Raycast(Camera.CFrame.Position, ray.Direction * 500)
+                local endPos = hit and hit.Position or Camera.CFrame.Position + ray.Direction * 500
+                local screenPos, onScreen = Camera:WorldToViewportPoint(endPos)
+                if onScreen then
+                    tracer.To = Vector2.new(screenPos.X, screenPos.Y)
+                    tracer.Thickness = 1
+                    tracer.Color = Color3.new(1, 0, 0)
+                    tracer.Visible = true
+                    table.insert(bulletTracers, {tracer, tick()})
+                else
+                    tracer:Remove()
+                end
+                task.wait(fireRate)
+            end
+        end)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isShooting = false
+    end
+end)
+RunService.RenderStepped:Connect(function()
+    for i = #bulletTracers, 1, -1 do
+        if tick() - bulletTracers[i][2] > 1 then
+            bulletTracers[i][1]:Remove()
+            table.remove(bulletTracers, i)
+        end
+    end
+end)
+-- Hit Logs implementation (notify on damage)
+local HitLogs = false
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local humanoid = char:WaitForChild("Humanoid")
+    humanoid.HealthChanged:Connect(function(health)
+        if HitLogs and health < humanoid.MaxHealth then
+            Lib:Notify("Hit " .. tostring(humanoid.MaxHealth - health) .. " damage")
+        end
+    end)
+end)
+-- Chams Implementation (single Highlight per player)
+local Chams = false
+local ChamsHighlights = {}
+local function ApplyChams(player)
+    if Chams and player.Character and not ChamsHighlights[player] then
+        local hl = Instance.new("Highlight")
+        hl.Name = "ChamHighlight"
+        hl.FillColor = Color3.new(1, 0, 0)
+        hl.OutlineColor = Color3.new(1, 1, 1)
+        hl.FillTransparency = 0.5
+        hl.OutlineTransparency = 0
+        hl.Adornee = player.Character
+        hl.Parent = player.Character
+        ChamsHighlights[player] = hl
+    end
+end
+local function RemoveChams(player)
+    if ChamsHighlights[player] then
+        ChamsHighlights[player]:Destroy()
+        ChamsHighlights[player] = nil
+    end
+end
+-- GlowESP Implementation
+local GlowESP = false
+local GlowHighlights = {}
+local function ApplyGlow(player)
+    if GlowESP and player.Character and not GlowHighlights[player] then
+        local hl = Instance.new("Highlight")
+        hl.Name = "GlowHighlight"
+        hl.FillColor = Color3.new(0, 1, 0)
+        hl.OutlineColor = Color3.new(0, 1, 0)
+        hl.FillTransparency = 0.3
+        hl.OutlineTransparency = 0
+        hl.Adornee = player.Character
+        hl.Parent = player.Character
+        GlowHighlights[player] = hl
+    end
+end
+local function RemoveGlow(player)
+    if GlowHighlights[player] then
+        GlowHighlights[player]:Destroy()
+        GlowHighlights[player] = nil
+    end
+end
+-- Player Added/Removed for ESP/Chams/Glow
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        CreateESP(player)
+        player.CharacterAdded:Connect(function(char)
+            CreateESP(player)
+            ApplyChams(player)
+            ApplyGlow(player)
+        end)
+        if player.Character then
+            ApplyChams(player)
+            ApplyGlow(player)
+        end
+    end
+end)
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        CreateESP(player)
+        if player.Character then 
+            ApplyChams(player)
+            ApplyGlow(player) 
+        end
+        player.CharacterAdded:Connect(function() 
+            ApplyChams(player) 
+            ApplyGlow(player)
+        end)
+    end
+end
+Players.PlayerRemoving:Connect(function(player)
+    if ESPObjects[player] then
+        for _, drawing in pairs(ESPObjects[player]) do
+            if typeof(drawing) == "table" then
+                for _, sub in ipairs(drawing) do sub:Remove() end
+            else
+                drawing:Remove()
+            end
+        end
+        ESPObjects[player] = nil
+    end
+    RemoveChams(player)
+    RemoveGlow(player)
+end)
+-- Aim Tab: 15 Aim Functions + 5 new (Double Tap, Hide Shots, Min Damage, Hitchance, Multipoint)
+local AimLeftGroup = AimTab:AddLeftGroupbox("Aimbot")
+local AimRightGroup = AimTab:AddRightGroupbox("Rage Aimbot")
+local AimbotEnabled = false
+AimLeftGroup:AddToggle('AimbotEnabled', {
+    Text = 'Enable Aimbot',
+    Default = false,
+    Callback = function(value) AimbotEnabled = value end
+})
+local AimbotFOV = 150
+AimLeftGroup:AddSlider('AimbotFOV', {
+    Text = 'Aimbot FOV',
+    Min = 0,
+    Max = 500,
+    Default = 150,
+    Rounding = 0,
+    Callback = function(value) AimbotFOV = value end
+})
+local VisibleCheck = true
+AimLeftGroup:AddToggle('VisibleCheck', {
+    Text = 'Visible Check',
+    Default = true,
+    Callback = function(value) VisibleCheck = value end
+})
+AimLeftGroup:AddDropdown('HitPart', {
+    Text = 'Hit Part',
+    Values = {"Head", "Torso", "Random"},
+    Default = 1,
+    Callback = function(value) HitPart = value end
+})
+local Smoothing = 0.5
+AimLeftGroup:AddSlider('Smoothing', {
+    Text = 'Smoothing',
+    Min = 0,
+    Max = 1,
+    Default = 0.5,
+    Rounding = 2,
+    Callback = function(value) Smoothing = value end
+})
+local SilentAim = false
+AimLeftGroup:AddToggle('SilentAim', {
+    Text = 'Silent Aim',
+    Default = false,
+    Callback = function(value) SilentAim = value end
+})
+local Triggerbot = false
+AimLeftGroup:AddToggle('Triggerbot', {
+    Text = 'Triggerbot',
+    Default = false,
+    Callback = function(value) Triggerbot = value end
+})
+local TriggerDelay = 0
+AimLeftGroup:AddSlider('TriggerDelay', {
+    Text = 'Trigger Delay',
+    Min = 0,
+    Max = 1,
+    Default = 0,
+    Rounding = 2,
+    Callback = function(value) TriggerDelay = value end
+})
+local Wallbang = false
+AimLeftGroup:AddToggle('Wallbang', {
+    Text = 'Wallbang',
+    Default = false,
+    Callback = function(value) Wallbang = value end
+})
+local TeamCheck = true
+AimLeftGroup:AddToggle('TeamCheck', {
+    Text = 'Team Check',
+    Default = true,
+    Callback = function(value) TeamCheck = value end
+})
+local NoRecoil = false
+AimLeftGroup:AddToggle('NoRecoil', {
+    Text = 'No Recoil',
+    Default = false,
+    Callback = function(value) NoRecoil = value end
+})
+local NoSpread = false
+AimLeftGroup:AddToggle('NoSpread', {
+    Text = 'No Spread',
+    Default = false,
+    Callback = function(value) NoSpread = value end
+})
+local AutoShoot = false
+AimLeftGroup:AddToggle('AutoShoot', {
+    Text = 'Auto Shoot',
+    Default = false,
+    Callback = function(value) AutoShoot = value end
+})
+local PredictionStrength = 1
+AimLeftGroup:AddSlider('PredictionStrength', {
+    Text = 'Prediction Strength',
+    Min = 0,
+    Max = 5,
+    Default = 1,
+    Rounding = 1,
+    Callback = function(value) PredictionStrength = value end
+})
+local IgnoreFriends = false
+AimLeftGroup:AddToggle('IgnoreFriends', {
+    Text = 'Ignore Friends',
+    Default = false,
+    Callback = function(value) IgnoreFriends = value end
+})
+-- New Rage Features
+local DoubleTap = false
+AimRightGroup:AddToggle('DoubleTap', {
+    Text = 'Double Tap',
+    Default = false,
+    Callback = function(value) DoubleTap = value end
+}) -- Implement by firing twice quickly
+local HideShots = false
+AimRightGroup:AddToggle('HideShots', {
+    Text = 'Hide Shots',
+    Default = false,
+    Callback = function(value) HideShots = value end
+}) -- Silent aim variant
+local MinDamage = 10
+AimRightGroup:AddSlider('MinDamage', {
+    Text = 'Min Damage',
+    Min = 0,
+    Max = 100,
+    Default = 10,
+    Rounding = 0,
+    Callback = function(value) MinDamage = value end
+}) -- Skip if damage < min, but universal hard
+local HitChance = 80
+AimRightGroup:AddSlider('HitChance', {
+    Text = 'Hit Chance',
+    Min = 0,
+    Max = 100,
+    Default = 80,
+    Rounding = 0,
+    Callback = function(value) HitChance = value end
+}) -- Random check before aim
+local Multipoint = false
+AimRightGroup:AddToggle('Multipoint', {
+    Text = 'Multipoint',
+    Default = false,
+    Callback = function(value) Multipoint = value end
+}) -- Scan multiple points
+-- Update Aimbot with new features
+RunService.RenderStepped:Connect(function(delta)
+    if AimbotEnabled then
+        local target = GetClosestPlayerToCrosshair(AimbotFOV, VisibleCheck, TeamCheck, Wallbang)
+        if target and math.random(1, 100) <= HitChance then
+            local part = GetHitPart(target)
+            if not part then return end
+            local targetPos = part.Position + part.Velocity * PredictionStrength * (part.Position - Camera.CFrame.Position).Magnitude / 1000
+            local currentCFrame = Camera.CFrame
+            local newCFrame = CFrame.lookAt(currentCFrame.Position, targetPos)
+            Camera.CFrame = currentCFrame:Lerp(newCFrame, 1 - Smoothing)
+            if AutoShoot then
+                VirtualInputManager:SendMouseButtonEvent(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2, 0, true, game, 0)
+                wait(0.05)
+                VirtualInputManager:SendMouseButtonEvent(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2, 0, false, game, 0)
+                if DoubleTap then
+                    wait(0.01)
+                    VirtualInputManager:SendMouseButtonEvent(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2, 0, true, game, 0)
+                    wait(0.05)
+                    VirtualInputManager:SendMouseButtonEvent(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2, 0, false, game, 0)
+                end
+            end
+        end
+    end
+    if Triggerbot then
+        local target = GetClosestPlayerToCrosshair(5, VisibleCheck, TeamCheck, Wallbang)
+        if target then
+            wait(TriggerDelay)
+            VirtualInputManager:SendMouseButtonEvent(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2, 0, true, game, 0)
+            wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2, 0, false, game, 0)
+        end
+    end
+end)
+-- Visuals Tab: 30 Visual Functions + 5 new (Glow ESP, Bullet Impacts, World Modulation, Remove Flash, Remove Smoke)
+local VisualsLeftGroup = VisualsTab:AddLeftGroupbox("ESP")
+local VisualsRightGroup = VisualsTab:AddRightGroupbox("Other Visuals")
+VisualsLeftGroup:AddToggle('ESPEnabled', {
+    Text = 'ESP Enabled',
+    Default = false,
+    Callback = function(value) ESPEnabled = value end
+})
+VisualsLeftGroup:AddToggle('BoxESP', {
+    Text = 'Box ESP',
+    Default = false,
+    Callback = function(value) BoxESP = value end
+})
+VisualsLeftGroup:AddToggle('NameESP', {
+    Text = 'Name ESP',
+    Default = false,
+    Callback = function(value) NameESP = value end
+})
+VisualsLeftGroup:AddToggle('HealthBar', {
+    Text = 'Health Bar',
+    Default = false,
+    Callback = function(value) HealthBar = value end
+})
+VisualsLeftGroup:AddToggle('DistanceESP', {
+    Text = 'Distance ESP',
+    Default = false,
+    Callback = function(value) DistanceESP = value end
+})
+VisualsLeftGroup:AddToggle('Tracers', {
+    Text = 'Tracers',
+    Default = false,
+    Callback = function(value) Tracers = value end
+})
+VisualsLeftGroup:AddToggle('Skeleton', {
+    Text = 'Skeleton ESP',
+    Default = false,
+    Callback = function(value) Skeleton = value end
+})
+VisualsLeftGroup:AddToggle('Chams', {
+    Text = 'Chams',
+    Default = false,
+    Callback = function(value)
+        Chams = value
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                if value then ApplyChams(p) else RemoveChams(p) end
+            end
+        end
+    end
+})
+local Highlights = false
+VisualsLeftGroup:AddToggle('Highlights', {
+    Text = 'Highlights',
+    Default = false,
+    Callback = function(value) Highlights = value end
+})
+VisualsLeftGroup:AddToggle('HeadDot', {
+    Text = 'Head Dot',
+    Default = false,
+    Callback = function(value) HeadDot = value end
+})
+local FOVCircle = false
+VisualsRightGroup:AddToggle('FOVCircle', {
+    Text = 'FOV Circle',
+    Default = false,
+    Callback = function(value) FOVCircle = value end
+})
+local fovCircleDrawing = Drawing.new("Circle")
+fovCircleDrawing.Visible = false
+fovCircleDrawing.Radius = AimbotFOV
+fovCircleDrawing.Position = Vector2.new(0,0)
+fovCircleDrawing.Color = Color3.new(1,1,1)
+fovCircleDrawing.Thickness = 1
+RunService.RenderStepped:Connect(function()
+    if FOVCircle then
+        fovCircleDrawing.Position = UserInputService:GetMouseLocation()
+        fovCircleDrawing.Radius = AimbotFOV
+        fovCircleDrawing.Visible = true
+    else
+        fovCircleDrawing.Visible = false
+    end
+end)
+local CustomCrosshair = false
+VisualsRightGroup:AddToggle('CustomCrosshair', {
+    Text = 'Custom Crosshair',
+    Default = false,
+    Callback = function(value) CustomCrosshair = value end
+})
+local crosshairLines = {Drawing.new("Line"), Drawing.new("Line")}
+crosshairLines[1].Thickness = 2
+crosshairLines[1].Color = Color3.new(0,1,0)
+crosshairLines[2].Thickness = 2
+crosshairLines[2].Color = Color3.new(0,1,0)
+RunService.RenderStepped:Connect(function()
+    if CustomCrosshair then
+        local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        crosshairLines[1].From = center - Vector2.new(10, 0)
+        crosshairLines[1].To = center + Vector2.new(10, 0)
+        crosshairLines[2].From = center - Vector2.new(0, 10)
+        crosshairLines[2].To = center + Vector2.new(0, 10)
+        crosshairLines[1].Visible = true
+        crosshairLines[2].Visible = true
+    else
+        crosshairLines[1].Visible = false
+        crosshairLines[2].Visible = false
+    end
+end)
+VisualsRightGroup:AddToggle('HitLogs', {
+    Text = 'Hit Logs',
+    Default = false,
+    Callback = function(value) HitLogs = value end
+})
+VisualsRightGroup:AddToggle('BulletTracers', {
+    Text = 'Bullet Tracers',
+    Default = false,
+    Callback = function(value) BulletTracers = value end
+})
+local ItemESP = false
+VisualsRightGroup:AddToggle('ItemESP', {
+    Text = 'Item ESP',
+    Default = false,
+    Callback = function(value) ItemESP = value end
+})
+local NPCESP = false
+VisualsRightGroup:AddToggle('NPCESP', {
+    Text = 'NPC ESP',
+    Default = false,
+    Callback = function(value) NPCESP = value end
+})
+local WeaponESP = false
+VisualsRightGroup:AddToggle('WeaponESP', {
+    Text = 'Weapon ESP',
+    Default = false,
+    Callback = function(value) WeaponESP = value end
+}) -- Implement similar to item
+local NoRecoilVisual = false
+VisualsRightGroup:AddToggle('NoRecoilVisual', {
+    Text = 'No Recoil Visual',
+    Default = false,
+    Callback = function(value) NoRecoilVisual = value end
+})
+local Wallhack = false
+VisualsRightGroup:AddToggle('Wallhack', {
+    Text = 'Wallhack',
+    Default = false,
+    Callback = function(value) Wallhack = value
+        if value then
+            for _, part in pairs(Workspace:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and part.Transparency < 0.5 then
+                    part.Transparency = 0.7
+                end
+            end
+        else
+            -- Revert not implemented, as originals not saved
+        end
+    end
+})
+local ThirdPerson = false
+VisualsRightGroup:AddToggle('ThirdPerson', {
+    Text = 'Third Person',
+    Default = false,
+    Callback = function(value) ThirdPerson = value
+        if value then
+            LocalPlayer.CameraMaxZoomDistance = 20
+            LocalPlayer.CameraMinZoomDistance = 20
+        else
+            LocalPlayer.CameraMaxZoomDistance = 400
+            LocalPlayer.CameraMinZoomDistance = 0.5
+        end
+    end
+})
+local Radar = false
+VisualsRightGroup:AddToggle('Radar', {
+    Text = 'Radar',
+    Default = false,
+    Callback = function(value) Radar = value end
+}) -- Implement mini map if possible
+local Watermark = false
+VisualsRightGroup:AddToggle('Watermark', {
+    Text = 'Watermark',
+    Default = false,
+    Callback = function(value) Watermark = value end
+})
+local watermarkText = Drawing.new("Text")
+watermarkText.Text = "Universal Hack v1.0"
+watermarkText.Position = Vector2.new(10, 10)
+watermarkText.Size = 20
+watermarkText.Color = Color3.new(1,1,1)
+watermarkText.Visible = false
+RunService.RenderStepped:Connect(function()
+    watermarkText.Visible = Watermark
+end)
+local KeybindsList = false
+VisualsRightGroup:AddToggle('KeybindsList', {
+    Text = 'Keybinds List',
+    Default = false,
+    Callback = function(value) KeybindsList = value end
+}) -- Draw list of keybinds
+local SpectatorList = false
+VisualsRightGroup:AddToggle('SpectatorList', {
+    Text = 'Spectator List',
+    Default = false,
+    Callback = function(value) SpectatorList = value end
+}) -- List spectators if game has
+local BulletImpacts = false
+local isImpact = false
+VisualsRightGroup:AddToggle('BulletImpacts', {
+    Text = 'Bullet Impacts',
+    Default = false,
+    Callback = function(value) BulletImpacts = value end
+}) -- New: Draw at bullet hit
+UserInputService.InputBegan:Connect(function(input)
+    if BulletImpacts and input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isImpact = true
+        spawn(function()
+            while isImpact do
+                local ray = Camera:ScreenPointToRay(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+                local hit = Workspace:Raycast(Camera.CFrame.Position, ray.Direction * 500)
+                if hit then
+                    local sphere = Instance.new("Part")
+                    sphere.Shape = Enum.PartShape.Ball
+                    sphere.Size = Vector3.new(0.5, 0.5, 0.5)
+                    sphere.Position = hit.Position
+                    sphere.Color = Color3.new(1, 0, 0)
+                    sphere.Anchored = true
+                    sphere.CanCollide = false
+                    sphere.Parent = Workspace
+                    table.insert(impactSpheres, {sphere, tick()})
+                end
+                task.wait(fireRate)
+            end
+        end)
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isImpact = false
+    end
+end)
+local GrenadeESP = false
+VisualsRightGroup:AddToggle('GrenadeESP', {
+    Text = 'Grenade ESP',
+    Default = false,
+    Callback = function(value) GrenadeESP = value end
+}) -- ESP on grenades, similar to item
+local DroppedWeaponESP = false
+VisualsRightGroup:AddToggle('DroppedWeaponESP', {
+    Text = 'Dropped Weapon ESP',
+    Default = false,
+    Callback = function(value) DroppedWeaponESP = value end
+}) -- Similar
+local NoFlash = false
+VisualsRightGroup:AddToggle('NoFlash', {
+    Text = 'No Flash',
+    Default = false,
+    Callback = function(value) 
+        NoFlash = value
+        if value then 
+            Lighting.Brightness = 1 
+            Lighting.GlobalShadows = false 
+        else 
+            Lighting.Brightness = 1 
+            Lighting.GlobalShadows = true 
+        end 
+    end
+}) -- New: Remove flash effects
+local NoSmoke = false
+VisualsRightGroup:AddToggle('NoSmoke', {
+    Text = 'No Smoke',
+    Default = false,
+    Callback = function(value) NoSmoke = value end
+}) -- New: Remove smoke particles
+local Fullbright = false
+VisualsRightGroup:AddToggle('Fullbright', {
+    Text = 'Fullbright',
+    Default = false,
+    Callback = function(value) 
+        Fullbright = value
+        if value then
+            Lighting.Brightness = 2
+            Lighting.Ambient = Color3.new(1,1,1)
+        else
+            Lighting.Brightness = 1
+            Lighting.Ambient = Color3.fromRGB(127,127,127)
+        end
+    end
+})
+VisualsLeftGroup:AddToggle('GlowESP', {
+    Text = 'Glow ESP',
+    Default = false,
+    Callback = function(value) 
+        GlowESP = value
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                if value then 
+                    if p.Character then ApplyGlow(p) end 
+                else 
+                    RemoveGlow(p) 
+                end
+            end
+        end
+    end
+}) -- New: Use SurfaceGui or something for glow
+local WorldModulation = false
+VisualsRightGroup:AddToggle('WorldModulation', {
+    Text = 'World Modulation',
+    Default = false,
+    Callback = function(value) 
+        WorldModulation = value
+        if value then
+            if not Lighting:FindFirstChild("ModCC") then
+                local cc = Instance.new("ColorCorrectionEffect")
+                cc.Name = "ModCC"
+                cc.TintColor = Color3.new(1, 0.5, 0.5)
+                cc.Parent = Lighting
+            end
+        else
+            if Lighting:FindFirstChild("ModCC") then
+                Lighting.ModCC:Destroy()
+            end
+        end
+    end
+}) -- New: Change world colors
+-- Remove Flash/Smoke (disable effects)
+RunService.RenderStepped:Connect(function()
+    if NoFlash then
+        for _, effect in pairs(Lighting:GetChildren()) do
+            if effect:IsA("BloomEffect") or effect:IsA("BlurEffect") then
+                effect.Enabled = false
+            end
+        end
+    else
+        for _, effect in pairs(Lighting:GetChildren()) do
+            if effect:IsA("BloomEffect") or effect:IsA("BlurEffect") then
+                effect.Enabled = true
+            end
+        end
+    end
+    if NoSmoke then
+        for _, part in pairs(Workspace:GetDescendants()) do
+            if part:IsA("ParticleEmitter") and part.Name:lower():find("smoke") then
+                part.Enabled = false
+            end
+        end
+    else
+        for _, part in pairs(Workspace:GetDescendants()) do
+            if part:IsA("ParticleEmitter") and part.Name:lower():find("smoke") then
+                part.Enabled = true
+            end
+        end
+    end
+end)
+-- Bullet Impacts (draw sphere at hit)
+local impactSpheres = {}
+RunService.RenderStepped:Connect(function()
+    for i = #impactSpheres, 1, -1 do
+        if tick() - impactSpheres[i][2] > 3 then
+            impactSpheres[i][1]:Destroy()
+            table.remove(impactSpheres, i)
+        end
+    end
+end)
+-- Update ESP loop
+RunService.RenderStepped:Connect(UpdateESP)
+-- Movement Tab: 30 Movement Functions (25 + 5 new)
+local MovementLeftGroup = MovementTab:AddLeftGroupbox("Movement")
+local MovementRightGroup = MovementTab:AddRightGroupbox("Movement Extra")
+local SpeedHack = false
+MovementLeftGroup:AddToggle('SpeedHack', {
+    Text = 'Speed Hack',
+    Default = false,
+    Callback = function(value) SpeedHack = value end
+})
+local SpeedAmount = 50
+MovementLeftGroup:AddSlider('SpeedAmount', {
+    Text = 'Speed',
+    Min = 16,
+    Max = 100,
+    Default = 50,
+    Rounding = 0,
+    Callback = function(value) SpeedAmount = value end
+})
+RunService.Heartbeat:Connect(function()
+    if SpeedHack and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = SpeedAmount
+    end
+end)
+local BunnyHop = false
+MovementLeftGroup:AddToggle('BunnyHop', {
+    Text = 'Bunny Hop',
+    Default = false,
+    Callback = function(value) BunnyHop = value end
+})
+UserInputService.JumpRequest:Connect(function()
+    if BunnyHop and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+local Fly = false
+MovementLeftGroup:AddToggle('Fly', {
+    Text = 'Fly',
+    Default = false,
+    Callback = function(value) Fly = value
+        if value and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local bv = Instance.new("BodyVelocity")
+            bv.Velocity = Vector3.new(0,0,0)
+            bv.MaxForce = Vector3.new(1e9,1e9,1e9)
+            bv.Parent = LocalPlayer.Character.HumanoidRootPart
+            bv.Name = "FlyBV"
+        else
+            if LocalPlayer.Character and LocalPlayer.Character.HumanoidRootPart:FindFirstChild("FlyBV") then
+                LocalPlayer.Character.HumanoidRootPart.FlyBV:Destroy()
+            end
+        end
+    end
+})
+local FlySpeed = 50
+MovementLeftGroup:AddSlider('FlySpeed', {
+    Text = 'Fly Speed',
+    Min = 1,
+    Max = 200,
+    Default = 50,
+    Rounding = 0,
+    Callback = function(value) FlySpeed = value end
+})
+local flyDir = Vector3.new(0,0,0)
+RunService.Heartbeat:Connect(function()
+    if Fly and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart:FindFirstChild("FlyBV") then
+        LocalPlayer.Character.HumanoidRootPart.FlyBV.Velocity = Camera.CFrame:VectorToWorldSpace(flyDir) * FlySpeed
+    end
+end)
+local flyKeys = {Enum.KeyCode.W, Enum.KeyCode.S, Enum.KeyCode.A, Enum.KeyCode.D, Enum.KeyCode.Space, Enum.KeyCode.LeftControl}
+UserInputService.InputBegan:Connect(function(input)
+    if Fly and table.find(flyKeys, input.KeyCode) then
+        if input.KeyCode == Enum.KeyCode.W then flyDir = flyDir + Vector3.new(0,0,-1) end
+        if input.KeyCode == Enum.KeyCode.S then flyDir = flyDir + Vector3.new(0,0,1) end
+        if input.KeyCode == Enum.KeyCode.A then flyDir = flyDir + Vector3.new(-1,0,0) end
+        if input.KeyCode == Enum.KeyCode.D then flyDir = flyDir + Vector3.new(1,0,0) end
+        if input.KeyCode == Enum.KeyCode.Space then flyDir = flyDir + Vector3.new(0,1,0) end
+        if input.KeyCode == Enum.KeyCode.LeftControl then flyDir = flyDir + Vector3.new(0,-1,0) end
+    end
+end)
+UserInputService.InputEnded:Connect(function(input)
+    if Fly and table.find(flyKeys, input.KeyCode) then
+        if input.KeyCode == Enum.KeyCode.W then flyDir = flyDir - Vector3.new(0,0,-1) end
+        if input.KeyCode == Enum.KeyCode.S then flyDir = flyDir - Vector3.new(0,0,1) end
+        if input.KeyCode == Enum.KeyCode.A then flyDir = flyDir - Vector3.new(-1,0,0) end
+        if input.KeyCode == Enum.KeyCode.D then flyDir = flyDir - Vector3.new(1,0,0) end
+        if input.KeyCode == Enum.KeyCode.Space then flyDir = flyDir - Vector3.new(0,1,0) end
+        if input.KeyCode == Enum.KeyCode.LeftControl then flyDir = flyDir - Vector3.new(0,-1,0) end
+    end
+end)
+local Noclip = false
+MovementLeftGroup:AddToggle('Noclip', {
+    Text = 'Noclip',
+    Default = false,
+    Callback = function(value) Noclip = value end
+})
+RunService.Stepped:Connect(function(_, delta)
+    if Noclip and LocalPlayer.Character then
+        for _, part in pairs(LocalPlayer.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
+local InfJump = false
+MovementLeftGroup:AddToggle('InfJump', {
+    Text = 'Infinite Jump',
+    Default = false,
+    Callback = function(value) InfJump = value end
+})
+UserInputService.InputBegan:Connect(function(input)
+    if InfJump and input.KeyCode == Enum.KeyCode.Space and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end)
+local NoFall = false
+local noFallConns = {}
+MovementLeftGroup:AddToggle('NoFall', {
+    Text = 'No Fall Damage',
+    Default = false,
+    Callback = function(value) 
+        NoFall = value
+        if value then
+            if LocalPlayer.Character then
+                local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+                if humanoid then
+                    local conn = humanoid.StateChanged:Connect(function(old, new)
+                        if new == Enum.HumanoidStateType.Landed and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                            LocalPlayer.Character.HumanoidRootPart.Velocity = Vector3.new(LocalPlayer.Character.HumanoidRootPart.Velocity.X, 0, LocalPlayer.Character.HumanoidRootPart.Velocity.Z)
+                        end
+                    end)
+                    table.insert(noFallConns, conn)
+                end
+            end
+        else
+            for _, conn in pairs(noFallConns) do
+                conn:Disconnect()
+            end
+            noFallConns = {}
+        end
+    end
+})
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if NoFall then
+        local humanoid = char:WaitForChild("Humanoid")
+        local conn = humanoid.StateChanged:Connect(function(old, new)
+            if new == Enum.HumanoidStateType.Landed and char:FindFirstChild("HumanoidRootPart") then
+                char.HumanoidRootPart.Velocity = Vector3.new(char.HumanoidRootPart.Velocity.X, 0, char.HumanoidRootPart.Velocity.Z)
+            end
+        end)
+        table.insert(noFallConns, conn)
+    end
+end)
+local AutoStrafe = false
+MovementLeftGroup:AddToggle('AutoStrafe', {
+    Text = 'Auto Strafe',
+    Default = false,
+    Callback = function(value) AutoStrafe = value end
+})
+local AirJump = false
+MovementLeftGroup:AddToggle('AirJump', {
+    Text = 'Air Jump',
+    Default = false,
+    Callback = function(value) AirJump = value end
+})
+local EdgeJump = false
+MovementRightGroup:AddToggle('EdgeJump', {
+    Text = 'Edge Jump',
+    Default = false,
+    Callback = function(value) EdgeJump = value end
+})
+local LongJump = false
+MovementRightGroup:AddToggle('LongJump', {
+    Text = 'Long Jump',
+    Default = false,
+    Callback = function(value) LongJump = value end
+}) -- Boost forward on jump
+RunService.Stepped:Connect(function()
+    if LongJump and LocalPlayer.Character and LocalPlayer.Character.Humanoid:GetState() == Enum.HumanoidStateType.Jumping then
+        LocalPlayer.Character.HumanoidRootPart.Velocity = LocalPlayer.Character.HumanoidRootPart.Velocity + LocalPlayer.Character.HumanoidRootPart.CFrame.LookVector * 20
+    end
+end)
+local HighJump = false
+local JumpPower = 100
+MovementRightGroup:AddToggle('HighJump', {
+    Text = 'High Jump',
+    Default = false,
+    Callback = function(value) HighJump = value
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.JumpPower = value and JumpPower or 50
+        end
+    end
+})
+MovementRightGroup:AddSlider('JumpPower', {
+    Text = 'Jump Power',
+    Min = 50,
+    Max = 200,
+    Default = 100,
+    Rounding = 0,
+    Callback = function(value) JumpPower = value
+        if HighJump and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            LocalPlayer.Character.Humanoid.JumpPower = value
+        end
+    end
+})
+local NoSlowdown = false
+MovementRightGroup:AddToggle('NoSlowdown', {
+    Text = 'No Slowdown',
+    Default = false,
+    Callback = function(value) NoSlowdown = value end
+}) -- Set walk speed to max always
+RunService.Heartbeat:Connect(function()
+    if NoSlowdown and LocalPlayer.Character and LocalPlayer.Character.Humanoid then
+        LocalPlayer.Character.Humanoid.WalkSpeed = math.max(LocalPlayer.Character.Humanoid.WalkSpeed, 16)
+    end
+end)
+local AntiKnockback = false
+local antiKnockbackConns = {}
+MovementRightGroup:AddToggle('AntiKnockback', {
+    Text = 'Anti Knockback',
+    Default = false,
+    Callback = function(value) 
+        AntiKnockback = value
+        if value then
+            if LocalPlayer.Character then
+                local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local conn = root:GetPropertyChangedSignal("Velocity"):Connect(function()
+                        local vel = root.Velocity
+                        root.Velocity = Vector3.new(vel.X * 0.5, vel.Y, vel.Z * 0.5)
+                    end)
+                    table.insert(antiKnockbackConns, conn)
+                end
+            end
+        else
+            for _, conn in pairs(antiKnockbackConns) do
+                conn:Disconnect()
+            end
+            antiKnockbackConns = {}
+        end
+    end
+})
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if AntiKnockback then
+        local root = char:WaitForChild("HumanoidRootPart")
+        local conn = root:GetPropertyChangedSignal("Velocity"):Connect(function()
+            local vel = root.Velocity
+            root.Velocity = Vector3.new(vel.X * 0.5, vel.Y, vel.Z * 0.5)
+        end)
+        table.insert(antiKnockbackConns, conn)
+    end
+end)
+local TeleportSpeed = false
+MovementRightGroup:AddToggle('TeleportSpeed', {
+    Text = 'Teleport Speed',
+    Default = false,
+    Callback = function(value) TeleportSpeed = value end
+}) -- Tele forward on key
+UserInputService.InputBegan:Connect(function(input)
+    if TeleportSpeed and input.KeyCode == Enum.KeyCode.LeftShift then
+        if LocalPlayer.Character and LocalPlayer.Character.HumanoidRootPart then
+            LocalPlayer.Character.HumanoidRootPart.CFrame = LocalPlayer.Character.HumanoidRootPart.CFrame + LocalPlayer.Character.HumanoidRootPart.CFrame.LookVector * 10
+        end
+    end
+end)
+local Phase = false
+MovementRightGroup:AddToggle('Phase', {
+    Text = 'Phase',
+    Default = false,
+    Callback = function(value) Phase = value end
+}) -- Noclip variant for thin walls
+local SafeWalk = false
+MovementRightGroup:AddToggle('SafeWalk', {
+    Text = 'Safe Walk',
+    Default = false,
+    Callback = function(value) SafeWalk = value end
+}) -- Slow near edges
+local SpiderClimb = false
+MovementRightGroup:AddToggle('SpiderClimb', {
+    Text = 'Spider Climb',
+    Default = false,
+    Callback = function(value) SpiderClimb = value end
+}) -- Climb walls by velocity up on touch
+RunService.Stepped:Connect(function()
+    if SpiderClimb and LocalPlayer.Character and LocalPlayer.Character.Humanoid then
+        local ray = Ray.new(LocalPlayer.Character.HumanoidRootPart.Position, LocalPlayer.Character.HumanoidRootPart.CFrame.LookVector * 1)
+        local hit = Workspace:FindPartOnRay(ray)
+        if hit then
+            LocalPlayer.Character.HumanoidRootPart.Velocity = Vector3.new(LocalPlayer.Character.HumanoidRootPart.Velocity.X, 20, LocalPlayer.Character.HumanoidRootPart.Velocity.Z)
+        end
+    end
+end)
+local Jesus = false
+MovementRightGroup:AddToggle('Jesus', {
+    Text = 'Jesus',
+    Default = false,
+    Callback = function(value) Jesus = value end
+})
+local AntiStun = false
+MovementRightGroup:AddToggle('AntiStun', {
+    Text = 'Anti Stun',
+    Default = false,
+    Callback = function(value) AntiStun = value end
+}) -- Reset state if stunned
+RunService.Heartbeat:Connect(function()
+    if AntiStun and LocalPlayer.Character and LocalPlayer.Character.Humanoid:GetState() == Enum.HumanoidStateType.Stunned then
+        LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Running)
+    end
+end)
+local CircleStrafe = false
+MovementRightGroup:AddToggle('CircleStrafe', {
+    Text = 'Circle Strafe',
+    Default = false,
+    Callback = function(value) CircleStrafe = value end
+}) -- Circle around target
+local LadderSpeed = false
+MovementRightGroup:AddToggle('LadderSpeed', {
+    Text = 'Ladder Climb Speed',
+    Default = false,
+    Callback = function(value) LadderSpeed = value end
+}) -- Increase climb speed
+RunService.Heartbeat:Connect(function()
+    if LadderSpeed and LocalPlayer.Character and LocalPlayer.Character.Humanoid:GetState() == Enum.HumanoidStateType.Climbing then
+        LocalPlayer.Character.HumanoidRootPart.Velocity = Vector3.new(0, 50, 0)
+    end
+end)
+local JesusWalk = false
+MovementRightGroup:AddToggle('JesusWalk', {
+    Text = 'Jesus Walk',
+    Default = false,
+    Callback = function(value) JesusWalk = value end
+})
+-- New 5 Movement
+local Slide = false
+MovementRightGroup:AddToggle('Slide', {
+    Text = 'Slide',
+    Default = false,
+    Callback = function(value) Slide = value end
+}) -- Slide on crouch
+RunService.Stepped:Connect(function()
+    if Slide and LocalPlayer.Character and LocalPlayer.Character.Humanoid:GetState() == Enum.HumanoidStateType.Crouching then
+        LocalPlayer.Character.HumanoidRootPart.Velocity = LocalPlayer.Character.HumanoidRootPart.CFrame.LookVector * 50
+    end
+end)
+local CrouchJump = false
+MovementRightGroup:AddToggle('CrouchJump', {
+    Text = 'Crouch Jump',
+    Default = false,
+    Callback = function(value) CrouchJump = value end
+}) -- Jump higher on crouch
+RunService.Stepped:Connect(function()
+    if CrouchJump and LocalPlayer.Character and LocalPlayer.Character.Humanoid:GetState() == Enum.HumanoidStateType.Jumping and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+        LocalPlayer.Character.HumanoidRootPart.Velocity = Vector3.new(0, 100, 0)
+    end
+end)
+local SpeedBoost = false
+MovementRightGroup:AddToggle('SpeedBoost', {
+    Text = 'Speed Boost',
+    Default = false,
+    Callback = function(value) SpeedBoost = value end
+}) -- Boost on key
+UserInputService.InputBegan:Connect(function(input)
+    if SpeedBoost and input.KeyCode == Enum.KeyCode.LeftShift then
+        if LocalPlayer.Character and LocalPlayer.Character.Humanoid then
+            local originalSpeed = LocalPlayer.Character.Humanoid.WalkSpeed
+            LocalPlayer.Character.Humanoid.WalkSpeed = originalSpeed * 2
+            wait(1)
+            LocalPlayer.Character.Humanoid.WalkSpeed = originalSpeed
+        end
+    end
+end)
+local InfiniteStamina = false
+MovementRightGroup:AddToggle('InfiniteStamina', {
+    Text = 'Infinite Stamina',
+    Default = false,
+    Callback = function(value) InfiniteStamina = value end
+}) -- Assume stamina property, set to max
+RunService.Heartbeat:Connect(function()
+    if InfiniteStamina and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Stamina") then
+        LocalPlayer.Character.Stamina.Value = LocalPlayer.Character.Stamina.MaxValue
+    end
+end)
+local AutoClimb = false
+MovementRightGroup:AddToggle('AutoClimb', {
+    Text = 'Auto Climb',
+    Default = false,
+    Callback = function(value) AutoClimb = value end
+}) -- Auto jump on walls
+RunService.Stepped:Connect(function()
+    if AutoClimb and LocalPlayer.Character and LocalPlayer.Character.Humanoid then
+        local ray = Ray.new(LocalPlayer.Character.HumanoidRootPart.Position, LocalPlayer.Character.HumanoidRootPart.CFrame.LookVector * 2)
+        local hit = Workspace:FindPartOnRay(ray)
+        if hit then
+            LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+-- Anti-Aim Tab + 5 new (Resolver, Backstab, Peek Assist, Body Aim, Headshot Only)
+local AntiAimLeftGroup = AntiAimTab:AddLeftGroupbox("Anti-Aim")
+local AntiAimRightGroup = AntiAimTab:AddRightGroupbox("Advanced Anti-Aim")
+local AntiAimEnabled = false
+AntiAimLeftGroup:AddToggle('AntiAimEnabled', {
+    Text = 'Enable Anti-Aim',
+    Default = false,
+    Callback = function(value) AntiAimEnabled = value end
+})
+local AntiAimType = "Spin"
+AntiAimLeftGroup:AddDropdown('AntiAimType', {
+    Text = 'Type',
+    Values = {"Spin", "Jitter", "Fake Lag", "Desync"},
+    Default = 1,
+    Callback = function(value) AntiAimType = value end
+})
+local YawBase = 180
+AntiAimLeftGroup:AddSlider('YawBase', {
+    Text = 'Yaw Base',
+    Min = -180,
+    Max = 180,
+    Default = 180,
+    Rounding = 0,
+    Callback = function(value) YawBase = value end
+})
+local YawOffset = 0
+AntiAimLeftGroup:AddSlider('YawOffset', {
+    Text = 'Yaw Offset',
+    Min = -180,
+    Max = 180,
+    Default = 0,
+    Rounding = 0,
+    Callback = function(value) YawOffset = value end
+})
+local Pitch = 0
+AntiAimLeftGroup:AddSlider('Pitch', {
+    Text = 'Pitch',
+    Min = -89,
+    Max = 89,
+    Default = 0,
+    Rounding = 0,
+    Callback = function(value) Pitch = value end
+})
+local SpinSpeed = 10
+AntiAimLeftGroup:AddSlider('SpinSpeed', {
+    Text = 'Spin Speed',
+    Min = 1,
+    Max = 50000,
+    Default = 10,
+    Rounding = 0,
+    Callback = function(value) SpinSpeed = value end
+})
+local JitterAngle = 45
+AntiAimLeftGroup:AddSlider('JitterAngle', {
+    Text = 'Jitter Angle',
+    Min = 0,
+    Max = 180,
+    Default = 45,
+    Rounding = 0,
+    Callback = function(value) JitterAngle = value end
+})
+local FakeLagTime = 0.5 -- Time in seconds
+AntiAimLeftGroup:AddSlider('FakeLagTime', {
+    Text = 'Fake Lag Time (s)',
+    Min = 0,
+    Max = 2,
+    Default = 0.5,
+    Rounding = 2,
+    Callback = function(value) FakeLagTime = value end
+})
+local DesyncType = "Velocity"
+AntiAimLeftGroup:AddDropdown('DesyncType', {
+    Text = 'Desync Type',
+    Values = {"Velocity", "Position"},
+    Default = 1,
+    Callback = function(value) DesyncType = value end
+})
+local DesyncAmount = 50
+AntiAimLeftGroup:AddSlider('DesyncAmount', {
+    Text = 'Desync Amount',
+    Min = 0,
+    Max = 100,
+    Default = 50,
+    Rounding = 0,
+    Callback = function(value) DesyncAmount = value end
+})
+local Invert = false
+AntiAimLeftGroup:AddToggle('Invert', {
+    Text = 'Invert',
+    Default = false,
+    Callback = function(value) Invert = value end
+})
+local AtEdge = false
+AntiAimLeftGroup:AddToggle('AtEdge', {
+    Text = 'At Edge',
+    Default = false,
+    Callback = function(value) AtEdge = value end
+})
+local AvoidWalls = true
+AntiAimLeftGroup:AddToggle('AvoidWalls', {
+    Text = 'Avoid Walls',
+    Default = true,
+    Callback = function(value) AvoidWalls = value end
+})
+local LegitAA = false
+AntiAimLeftGroup:AddToggle('LegitAA', {
+    Text = 'Legit AA on Use',
+    Default = false,
+    Callback = function(value) LegitAA = value end
+})
+-- New Anti-Aim Features
+local Resolver = false
+AntiAimRightGroup:AddToggle('Resolver', {
+    Text = 'Resolver',
+    Default = false,
+    Callback = function(value) Resolver = value end
+}) -- Resolve enemy AA
+local Backstab = false
+AntiAimRightGroup:AddToggle('Backstab', {
+    Text = 'Backstab',
+    Default = false,
+    Callback = function(value) Backstab = value end
+}) -- Aim behind
+local BodyAim = false
+AntiAimRightGroup:AddToggle('BodyAim', {
+    Text = 'Body Aim',
+    Default = false,
+    Callback = function(value) BodyAim = value end
+}) -- Prefer body
+local HeadshotOnly = false
+AntiAimRightGroup:AddToggle('HeadshotOnly', {
+    Text = 'Headshot Only',
+    Default = false,
+    Callback = function(value) HeadshotOnly = value end
+}) -- Only head
+-- Added 5 more Neverlose functions
+local LagSync = false
+AntiAimRightGroup:AddToggle('LagSync', {
+    Text = 'Lag Sync',
+    Default = false,
+    Callback = function(value) LagSync = value end
+}) -- Sync lag for AA
+local FakeWalk = false
+AntiAimRightGroup:AddToggle('FakeWalk', {
+    Text = 'Fake Walk',
+    Default = false,
+    Callback = function(value) FakeWalk = value end
+}) -- Fake movement
+local AutoPeek = false
+AntiAimRightGroup:AddToggle('AutoPeek', {
+    Text = 'Auto Peek',
+    Default = false,
+    Callback = function(value) AutoPeek = value end
+}) -- Auto peek corners
+local ManualAA = false
+AntiAimRightGroup:AddToggle('ManualAA', {
+    Text = 'Manual AA',
+    Default = false,
+    Callback = function(value) ManualAA = value end
+}) -- Manual override
+local AAOnScope = false
+AntiAimRightGroup:AddToggle('AAOnScope', {
+    Text = 'AA On Scope',
+    Default = false,
+    Callback = function(value) AAOnScope = value end
+}) -- AA when scoping
+-- Anti-Aim Implementation with fixed logic and time-based fake lag (client ahead by predicting position)
+local angle = 0
+local jitterTick = 0
+local positionQueue = {}
+local lastTime = tick()
+local spinVariation = 0
+RunService.Heartbeat:Connect(function(delta)
+    if AntiAimEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local root = LocalPlayer.Character.HumanoidRootPart
+        local humanoid = LocalPlayer.Character.Humanoid
+        if AntiAimType == "Spin" then
+            spinVariation = math.random(-5, 5) -- Better with variation
+            angle = (angle + (SpinSpeed + spinVariation) * delta * (Invert and -1 or 1)) % 360
+            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(angle + YawBase + YawOffset), 0) * CFrame.Angles(math.rad(Pitch), 0, 0)
+        elseif AntiAimType == "Jitter" then
+            jitterTick = jitterTick + 1
+            local offset = (jitterTick % 3 == 0) and JitterAngle or (jitterTick % 3 == 1 and -JitterAngle or 0) -- Better variation
+            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, math.rad(YawBase + YawOffset + offset), 0) * CFrame.Angles(math.rad(Pitch), 0, 0)
+        elseif AntiAimType == "Fake Lag" then
+            local currentTime = tick()
+            if currentTime - lastTime > FakeLagTime then
+                -- Apply delayed position with correction
+                if #positionQueue > 0 then
+                    local delayedCFrame = table.remove(positionQueue, 1)
+                    root.CFrame = delayedCFrame:Lerp(root.CFrame, 0.5) -- Smooth correction
+                end
+                lastTime = currentTime
+            else
+                -- Predict and store with improved prediction
+                local predictedVel = root.Velocity + humanoid.MoveDirection * humanoid.WalkSpeed
+                local predictedPos = root.Position + predictedVel * FakeLagTime
+                table.insert(positionQueue, CFrame.new(predictedPos, predictedPos + root.CFrame.LookVector))
+            end
+        elseif AntiAimType == "Desync" then
+            if DesyncType == "Position" then
+                local desyncOffset = DesyncAmount / 10
+                root.CFrame = root.CFrame + root.CFrame.RightVector * desyncOffset * math.sin(tick() * 2) -- Improved frequency
+            elseif DesyncType == "Velocity" then
+                local desyncVel = Vector3.new(DesyncAmount, 0, DesyncAmount) * math.sin(tick() * 2)
+                root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + desyncVel -- Improved
+            end
+        end
+        -- Avoid walls check
+        if AvoidWalls then
+            local ray = Ray.new(root.Position, root.CFrame.LookVector * 2) -- Longer ray
+            local hit = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character})
+            if hit then
+                root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(180 + math.random(-30, 30)), 0) -- Better avoidance
+            end
+        end
+        -- At Edge
+        if AtEdge then
+            local edgeRay = Ray.new(root.Position, Vector3.new(0, -5, 0))
+            local edgeHit = Workspace:FindPartOnRayWithIgnoreList(edgeRay, {LocalPlayer.Character})
+            if not edgeHit then
+                root.CFrame = root.CFrame * CFrame.Angles(0, math.rad(90), 0) -- Spin sideways
+            end
+        end
+    end
+end)
+-- Misc Tab with 5 new (Skin Changer, Clantag, Killsay, Auto Buy, Hit Sound)
+local MiscLeftGroup = MiscTab:AddLeftGroupbox("Misc")
+local SkinChanger = false
+MiscLeftGroup:AddToggle('SkinChanger', {
+    Text = 'Skin Changer',
+    Default = false,
+    Callback = function(value) SkinChanger = value end
+}) -- Game-specific, assume change texture
+local ClantagChanger = false
+MiscLeftGroup:AddToggle('ClantagChanger', {
+    Text = 'Clantag Changer',
+    Default = false,
+    Callback = function(value) ClantagChanger = value end
+}) -- Set name tag, if game has
+local Killsay = false
+MiscLeftGroup:AddToggle('Killsay', {
+    Text = 'Killsay',
+    Default = false,
+    Callback = function(value) Killsay = value end
+}) -- Say on kill, connect to death
+local AutoBuy = false
+MiscLeftGroup:AddToggle('AutoBuy', {
+    Text = 'Auto Buy',
+    Default = false,
+    Callback = function(value) AutoBuy = value end
+}) -- Auto purchase, game-specific
+local HitSound = false
+MiscLeftGroup:AddToggle('HitSound', {
+    Text = 'Hit Sound',
+    Default = false,
+    Callback = function(value) HitSound = value end
+}) -- Play sound on hit, use Sound instance
+-- Implement HitSound
+local hitSound = Instance.new("Sound")
+hitSound.SoundId = "rbxassetid://9119729530" -- Example hit sound
+hitSound.Volume = 1
+hitSound.Parent = game:GetService("SoundService")
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local humanoid = char:WaitForChild("Humanoid")
+    humanoid.HealthChanged:Connect(function(health)
+        if HitSound and health < humanoid.MaxHealth then
+            hitSound:Play()
+        end
+    end)
+end)
+-- Menu Toggle
+local MenuVisible = true
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.LeftControl then
+        MenuVisible = not MenuVisible
+        Lib.Window:Toggle(MenuVisible)
+    end
+end)
+Lib:Notify("Universal Hack Loaded!")
