@@ -26,7 +26,6 @@ local SilentAimSettings = {
     MouseHitPredictionAmount = 0.165,
     HitChance = 100
 }
-
 -- variables
 getgenv().SilentAimSettings = Settings
 local MainFileName = "UniversalSilentAim"
@@ -246,7 +245,7 @@ local Window = Library:CreateWindow({Title = 'Universal Silent Aim', Center = tr
 local GeneralTab = Window:AddTab("General")
 local MainBOX = GeneralTab:AddLeftTabbox("Main") do
     local Main = MainBOX:AddTab("Main")
-    
+    local Options = Library.Options
     Main:AddToggle("aim_Enabled", {Text = "Enabled"}):AddKeyPicker("aim_Enabled_KeyPicker", {Default = "RightAlt", SyncToggleState = true, Mode = "Toggle", Text = "Enabled", NoUI = false});
     Options.aim_Enabled_KeyPicker:OnClick(function()
         SilentAimSettings.Enabled = not SilentAimSettings.Enabled
@@ -469,3 +468,6 @@ oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, Index)
 
     return oldIndex(self, Index)
 end))
+Main:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightControl", NoUI = true, Text = "Menu keybind" })
+Main:AddButton("Unload", function() Library:Unload() end)
+Library.ToggleKeybind = Options.MenuKeybind -- Allows you to have a custom keybind for the menu
